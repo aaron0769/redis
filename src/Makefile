@@ -12,6 +12,9 @@
 # Dependencies are stored in the Makefile.dep file. To rebuild this file
 # Just use 'make dep', but this is only needed by developers.
 
+# := 表示定义变量的时候就赋值（在按照makefile 文件顺序扩展）
+# $(shell <command>)表示用 shell 函数执行 shell 命令
+
 release_hdr := $(shell sh -c './mkreleasehdr.sh')
 uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
 uname_M := $(shell sh -c 'uname -m 2>/dev/null || echo not')
@@ -137,6 +140,7 @@ MAKECOLOR="\033[32;1m"
 ENDCOLOR="\033[0m"
 
 ifndef V
+# make 的时候只输出动作和对象，去掉参数
 QUIET_CC = @printf '    %b %b\n' $(CCCOLOR)CC$(ENDCOLOR) $(SRCCOLOR)$@$(ENDCOLOR) 1>&2;
 QUIET_LINK = @printf '    %b %b\n' $(LINKCOLOR)LINK$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR) 1>&2;
 QUIET_INSTALL = @printf '    %b %b\n' $(LINKCOLOR)INSTALL$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR) 1>&2;
@@ -158,15 +162,19 @@ all: $(REDIS_SERVER_NAME) $(REDIS_SENTINEL_NAME) $(REDIS_CLI_NAME) $(REDIS_BENCH
 	@echo ""
 
 Makefile.dep:
+	# 编译源码文件.c到目标文件.o
 	-$(REDIS_CC) -MM *.c > Makefile.dep 2> /dev/null || true
 
+# make 函数 words 返回字数；findstring 查询后者是否在前者中
 ifeq (0, $(words $(findstring $(MAKECMDGOALS), $(NODEPS))))
+# 这是第一个读和执行的操作
 -include Makefile.dep
 endif
 
 .PHONY: all
 
 persist-settings: distclean
+	# 把判断出来的参数进行持久化到.make-settings 文件
 	echo STD=$(STD) >> .make-settings
 	echo WARN=$(WARN) >> .make-settings
 	echo OPT=$(OPT) >> .make-settings
@@ -182,23 +190,30 @@ persist-settings: distclean
 .PHONY: persist-settings
 
 # Prerequisites target
+# 上面在include .make-prerequisites 时就会根据是否有这个文件以及里面是否有相关
+# 的PREV_FINAL_CFLAGS 或者 PREV_FINAL_LDFLAGS 参数判断选择是否会被下面的 target
+# 覆盖。
 .make-prerequisites:
 	@touch $@
 
 # Clean everything, persist settings and build dependencies if anything changed
+# 如果没有已经设置的参数（没有.make-prerequisites 这个文件），则执行persist-settings
 ifneq ($(strip $(PREV_FINAL_CFLAGS)), $(strip $(FINAL_CFLAGS)))
 .make-prerequisites: persist-settings
 endif
 
 ifneq ($(strip $(PREV_FINAL_LDFLAGS)), $(strip $(FINAL_LDFLAGS)))
+# 如果没有已经设置的参数（没有.make-prerequisites 这个文件），则执行persist-settings
 .make-prerequisites: persist-settings
 endif
 
 # redis-server
 $(REDIS_SERVER_NAME): $(REDIS_SERVER_OBJ)
+	# 编译 redis-server，编译前先把目标文件编译出来
 	$(REDIS_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/lua/src/liblua.a $(FINAL_LIBS)
 
 # redis-sentinel
+	# 安装 redis-sentinel，实际上只是把 redis-server 换个名字
 $(REDIS_SENTINEL_NAME): $(REDIS_SERVER_NAME)
 	$(REDIS_INSTALL) $(REDIS_SERVER_NAME) $(REDIS_SENTINEL_NAME)
 
@@ -225,7 +240,8 @@ dict-benchmark: dict.c zmalloc.c sds.c siphash.c
 # building it should complete before building any other object. Instead of
 # depending on a single artifact, build all dependencies first.
 %.o: %.c .make-prerequisites
-	$(REDIS_CC) -c $<
+	# 从 C 源文件编译成目标文件，同时准备前提环境
+	$(REDIS_CC) -c $<  # $<表示第一个prerequisite，即%.c
 
 clean:
 	rm -rf $(REDIS_SERVER_NAME) $(REDIS_SENTINEL_NAME) $(REDIS_CLI_NAME) $(REDIS_BENCHMARK_NAME) $(REDIS_CHECK_RDB_NAME) $(REDIS_CHECK_AOF_NAME) *.o *.gcda *.gcno *.gcov redis.info lcov-html Makefile.dep dict-benchmark
